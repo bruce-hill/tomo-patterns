@@ -1,4 +1,4 @@
-use patterns_v1.0
+use ./patterns.tm
 
 func main()
 	amelie := "Am\{UE9}lie"
