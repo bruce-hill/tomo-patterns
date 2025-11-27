@@ -2,59 +2,64 @@ use ./patterns.c
 
 struct PatternMatch(text:Text, index:Int, captures:[Text])
 
+lang Replacement
+    convert(text:Text -> Replacement)
+        return Replacement.from_text(text.replace("@", "@@"))
+
 lang Pat
     convert(text:Text -> Pat)
-        return C_code:Pat(Pattern$escape_text(@text))
+        return C_code:Pat`Pattern$escape_text(@text)`
 
     convert(n:Int -> Pat)
         return Pat.from_text("$n")
 
-extend Text
-    func matching_pattern(text:Text, pattern:Pat, pos:Int = 1 -> PatternMatch?)
+    func match(pattern:Pat, text:Text, pos:Int = 1 -> PatternMatch?)
         result : PatternMatch
-        if C_code:Bool(Pattern$match_at(@text, @pattern, @pos, (void*)&@result))
+        if C_code:Bool`Pattern$match_at(@text, @pattern, @pos, (void*)&@result)`
             return result
         return none
 
-    func matches_pattern(text:Text, pattern:Pat -> Bool)
-        return C_code:Bool(Pattern$matches(@text, @pattern))
+    func matches(pattern:Pat, text:Text -> Bool)
+        return C_code:Bool`Pattern$matches(@text, @pattern)`
 
-    func pattern_captures(text:Text, pattern:Pat -> [Text]?)
-        return C_code:[Text]?(Pattern$captures(@text, @pattern))
+    func capture(pattern:Pat, text:Text -> [Text]?)
+        return C_code:[Text]?`Pattern$captures(@text, @pattern)`
 
-    func replace_pattern(text:Text, pattern:Pat, replacement:Text, backref="@", recursive=yes -> Text)
-        return C_code:Text(Pattern$replace(@text, @pattern, @replacement, @backref, @recursive))
+    func replace(pattern:Pat, text:Text, replacement:Text, backref="@", recursive=yes -> Text)
+        return C_code:Text`Pattern$replace(@text, @pattern, @replacement, @backref, @recursive)`
 
-    func translate_patterns(text:Text, replacements:{Pat=Text}, backref="@", recursive=yes -> Text)
-        return C_code:Text(Pattern$replace_all(@text, @replacements, @backref, @recursive))
+    func translate(replacements:{Pat:Text}, text:Text, backref="@", recursive=yes -> Text)
+        return C_code:Text`Pattern$replace_all(@text, @replacements, @backref, @recursive)`
 
-    func has_pattern(text:Text, pattern:Pat -> Bool)
-        return C_code:Bool(Pattern$has(@text, @pattern))
+    func is_in(pattern:Pat, text:Text -> Bool)
+        return C_code:Bool`Pattern$has(@text, @pattern)`
 
-    func find_patterns(text:Text, pattern:Pat -> [PatternMatch])
-        return C_code:[PatternMatch](Pattern$find_all(@text, @pattern))
+    func find_in(pattern:Pat, text:Text -> [PatternMatch])
+        return C_code:[PatternMatch]`Pattern$find_all(@text, @pattern)`
 
-    func by_pattern(text:Text, pattern:Pat -> func(->PatternMatch?))
-        return C_code:func(->PatternMatch?)(Pattern$by_match(@text, @pattern))
+    func each_match(pattern:Pat, text:Text -> func(->PatternMatch?))
+        return C_code:func(->PatternMatch?)`Pattern$by_match(@text, @pattern)`
 
-    func each_pattern(text:Text, pattern:Pat, fn:func(m:PatternMatch), recursive=yes)
-        C_code { Pattern$each(@text, @pattern, @fn, @recursive); }
+    func for_each(pattern:Pat, text:Text, fn:func(m:PatternMatch), recursive=yes)
+        C_code ` Pattern$each(@text, @pattern, @fn, @recursive); `
 
-    func map_pattern(text:Text, pattern:Pat, fn:func(m:PatternMatch -> Text), recursive=yes -> Text)
-        return C_code:Text(Pattern$map(@text, @pattern, @fn, @recursive))
+    func map(pattern:Pat, text:Text, fn:func(m:PatternMatch -> Text), recursive=yes -> Text)
+        return C_code:Text`Pattern$map(@text, @pattern, @fn, @recursive)`
 
-    func split_pattern(text:Text, pattern:Pat -> [Text])
-        return C_code:[Text](Pattern$split(@text, @pattern))
+    func split(pattern:Pat, text:Text -> [Text])
+        return C_code:[Text]`Pattern$split(@text, @pattern)`
 
-    func by_pattern_split(text:Text, pattern:Pat -> func(->Text?))
-        return C_code:func(->Text?)(Pattern$by_split(@text, @pattern))
+    func by_split(pattern:Pat, text:Text -> func(->Text?))
+        return C_code:func(->Text?)`Pattern$by_split(@text, @pattern)`
 
-    func trim_pattern(text:Text, pattern=$Pat"{space}", left=yes, right=yes -> Text)
-        return C_code:Text(Pattern$trim(@text, @pattern, @left, @right))
+    func trim(pattern:Pat, text:Text, left=yes, right=yes -> Text)
+        return C_code:Text`Pattern$trim(@text, @pattern, @left, @right)`
+
 
 func main()
-    >> "Hello world".matching_pattern($Pat'{id}')
-    >> "...Hello world".matching_pattern($Pat'{id}')
+    pass
+    # >> "Hello world".match($Pat'{id}')
+    # >> "...Hello world".match($Pat'{id}')
 # func main(pattern:Pat, input=(/dev/stdin))
 #     for line in input.by_line()!
 #         skip if not line.has_pattern(pattern)

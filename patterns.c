@@ -43,7 +43,7 @@ typedef struct {
     };
 } pat_t;
 
-static Text_t replace_list(Text_t text, List_t replacements, Text_t backref_pat, bool recursive);
+static Text_t replace_list(Text_t text, List_t replacements, Text_t backref_marker, bool recursive);
 
 static INLINE void skip_whitespace(TextIter_t *state, int64_t *i) {
     while (*i < state->stack[0].text.length) {
@@ -477,7 +477,8 @@ static pat_t parse_next_pat(TextIter_t *state, int64_t *index) {
             .max = 1,
             .pair_graphemes = {open, close},
         };
-    } else if (EAT1(state, *index, grapheme == '{')) { // named patterns {id}, {2-3 hex}, etc.
+    } else if (EAT1(state, *index,
+                    grapheme == '{')) { // named patterns {id}, {2-3 hex}, etc.
         skip_whitespace(state, index);
         int64_t min, max;
         if (uc_is_digit((ucs4_t)Text$get_grapheme_fast(state, *index))) {
@@ -572,6 +573,10 @@ static pat_t parse_next_pat(TextIter_t *state, int64_t *index) {
                 return PAT(PAT_FUNCTION, .fn = match_ip);
             }
             break;
+        case 'l':
+            if (strcasecmp(prop_name, "letter") == 0) {
+                return PAT(PAT_PROPERTY, .property = UC_PROPERTY_ALPHABETIC);
+            }
         case 'n':
             if (strcasecmp(prop_name, "nl") == 0 || strcasecmp(prop_name, "newline") == 0) {
                 return PAT(PAT_FUNCTION, .fn = match_newline);
@@ -850,50 +855,64 @@ static Closure_t Pattern$by_match(Text_t text, Text_t pattern) {
     };
 }
 
-static Text_t apply_backrefs(Text_t text, List_t recursive_replacements, Text_t replacement, Text_t backref_pat,
-                             capture_t *captures) {
-    if (backref_pat.length == 0) return replacement;
+static bool substring_match_at(TextIter_t *haystack, TextIter_t *needle, int64_t pos) {
+    for (int64_t i = 0; i < needle->stack[0].text.length; i++) {
+        if (Text$get_grapheme_fast(haystack, pos + i) != Text$get_grapheme_fast(needle, i)) return false;
+    }
+    return true;
+}
 
-    int32_t first_grapheme = Text$get_grapheme(backref_pat, 0);
-    bool find_first = (first_grapheme != '{' && !uc_is_property((ucs4_t)first_grapheme, UC_PROPERTY_QUOTATION_MARK)
-                       && !uc_is_property((ucs4_t)first_grapheme, UC_PROPERTY_PAIRED_PUNCTUATION));
+static Text_t apply_backrefs(Text_t text, List_t recursive_replacements, Text_t replacement, Text_t backref_marker,
+                             capture_t *captures) {
+    if (backref_marker.length == 0) return replacement;
 
     Text_t ret = Text("");
     TextIter_t replacement_state = NEW_TEXT_ITER_STATE(replacement);
+    TextIter_t backref_state = NEW_TEXT_ITER_STATE(backref_marker);
+    int32_t first_grapheme = Text$get_grapheme_fast(&backref_state, 0);
     int64_t nonmatching_pos = 0;
     for (int64_t pos = 0; pos < replacement.length;) {
         // Optimization: quickly skip ahead to first char in the backref pattern:
-        if (find_first) {
-            while (pos < replacement.length && Text$get_grapheme_fast(&replacement_state, pos) != first_grapheme)
-                ++pos;
-        }
+        while (pos + 1 < replacement.length && Text$get_grapheme_fast(&replacement_state, pos) != first_grapheme)
+            ++pos;
 
-        int64_t backref_len = match(replacement, pos, backref_pat, 0, NULL, 0);
-        if (backref_len < 0) {
+        // If it's not a backref marker, proceed normally
+        if (!substring_match_at(&replacement_state, &backref_state, pos)) {
             pos += 1;
             continue;
         }
 
-        int64_t after_backref = pos + backref_len;
+        // For double backrefs like "@@", treat it as an escape
+        if (substring_match_at(&replacement_state, &backref_state, pos + backref_marker.length)) {
+            if (pos > nonmatching_pos) {
+                Text_t before_slice = Text$slice(replacement, I(nonmatching_pos + 1), I(pos));
+                ret = Texts(ret, before_slice);
+            }
+            ret = Texts(ret, backref_marker);
+            pos += 2 * backref_marker.length;
+            nonmatching_pos = pos;
+            continue;
+        }
+
+        int64_t after_backref = pos + backref_marker.length;
         int64_t backref = parse_int(&replacement_state, &after_backref);
-        if (after_backref == pos + backref_len) { // Not actually a backref if there's no number
+        if (after_backref == pos + backref_marker.length) { // Not actually a backref if there's no number
             pos += 1;
             continue;
         }
-        if (backref < 0 || backref > 9)
+        if (backref < 0 || backref >= MAX_BACKREFS)
             fail("Invalid backref index: ", backref, " (only 0-", MAX_BACKREFS - 1, " are allowed)");
-        backref_len = (after_backref - pos);
-
-        if (Text$get_grapheme_fast(&replacement_state, pos + backref_len) == ';')
-            backref_len += 1; // skip optional semicolon
 
         if (!captures[backref].occupied) fail("There is no capture number ", backref, "!");
+
+        if (Text$get_grapheme_fast(&replacement_state, after_backref) == ';')
+            after_backref += 1; // skip optional semicolon
 
         Text_t backref_text =
             Text$slice(text, I(captures[backref].index + 1), I(captures[backref].index + captures[backref].length));
 
         if (captures[backref].recursive && recursive_replacements.length > 0)
-            backref_text = replace_list(backref_text, recursive_replacements, backref_pat, true);
+            backref_text = replace_list(backref_text, recursive_replacements, backref_marker, true);
 
         if (pos > nonmatching_pos) {
             Text_t before_slice = Text$slice(replacement, I(nonmatching_pos + 1), I(pos));
@@ -902,7 +921,7 @@ static Text_t apply_backrefs(Text_t text, List_t recursive_replacements, Text_t 
             ret = Text$concat(ret, backref_text);
         }
 
-        pos += backref_len;
+        pos = after_backref;
         nonmatching_pos = pos;
     }
     if (nonmatching_pos < replacement.length) {
@@ -912,7 +931,7 @@ static Text_t apply_backrefs(Text_t text, List_t recursive_replacements, Text_t 
     return ret;
 }
 
-static Text_t Pattern$replace(Text_t text, Text_t pattern, Text_t replacement, Text_t backref_pat, bool recursive) {
+static Text_t Pattern$replace(Text_t text, Text_t pattern, Text_t replacement, Text_t backref_marker, bool recursive) {
     Text_t ret = EMPTY_TEXT;
 
     int32_t first_grapheme = Text$get_grapheme(pattern, 0);
@@ -949,7 +968,7 @@ static Text_t Pattern$replace(Text_t text, Text_t pattern, Text_t replacement, T
         };
 
         Text_t replacement_text =
-            apply_backrefs(text, recursive ? replacements : (List_t){}, replacement, backref_pat, captures);
+            apply_backrefs(text, recursive ? replacements : (List_t){}, replacement, backref_marker, captures);
         if (pos > nonmatching_pos) {
             Text_t before_slice = Text$slice(text, I(nonmatching_pos + 1), I(pos));
             ret = Text$concat(ret, before_slice, replacement_text);
@@ -1066,7 +1085,7 @@ static void Pattern$each(Text_t text, Text_t pattern, Closure_t fn, bool recursi
     }
 }
 
-Text_t replace_list(Text_t text, List_t replacements, Text_t backref_pat, bool recursive) {
+Text_t replace_list(Text_t text, List_t replacements, Text_t backref_marker, bool recursive) {
     if (replacements.length == 0) return text;
 
     Text_t ret = EMPTY_TEXT;
@@ -1082,7 +1101,8 @@ Text_t replace_list(Text_t text, List_t replacements, Text_t backref_pat, bool r
             captures[0].index = pos;
             captures[0].length = len;
 
-            // If we skipped over some non-matching text before finding a match, insert it here:
+            // If we skipped over some non-matching text before finding a match,
+            // insert it here:
             if (pos > nonmatch_pos) {
                 Text_t before_slice = Text$slice(text, I(nonmatch_pos + 1), I(pos));
                 ret = Text$concat(ret, before_slice);
@@ -1091,7 +1111,7 @@ Text_t replace_list(Text_t text, List_t replacements, Text_t backref_pat, bool r
             // Concatenate the replacement:
             Text_t replacement = *(Text_t *)(replacements.data + i * replacements.stride + sizeof(Text_t));
             Text_t replacement_text =
-                apply_backrefs(text, recursive ? replacements : (List_t){}, replacement, backref_pat, captures);
+                apply_backrefs(text, recursive ? replacements : (List_t){}, replacement, backref_marker, captures);
             ret = Text$concat(ret, replacement_text);
             pos += MAX(len, 1);
             nonmatch_pos = pos;
@@ -1110,8 +1130,8 @@ Text_t replace_list(Text_t text, List_t replacements, Text_t backref_pat, bool r
     return ret;
 }
 
-static Text_t Pattern$replace_all(Text_t text, Table_t replacements, Text_t backref_pat, bool recursive) {
-    return replace_list(text, replacements.entries, backref_pat, recursive);
+static Text_t Pattern$replace_all(Text_t text, Table_t replacements, Text_t backref_marker, bool recursive) {
+    return replace_list(text, replacements.entries, backref_marker, recursive);
 }
 
 static List_t Pattern$split(Text_t text, Text_t pattern) {
