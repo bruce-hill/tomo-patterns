@@ -767,7 +767,9 @@ static OptionalPatternMatch find(Text_t text, Text_t pattern, Int_t from_index) 
 }
 
 PUREFUNC static bool Pattern$has(Text_t text, Text_t pattern) {
-    if (Text$starts_with(pattern, Text("{start}"), &pattern)) {
+    if (pattern.length == 0) {
+        return true;
+    } else if (Text$starts_with(pattern, Text("{start}"), &pattern)) {
         int64_t m = match(text, 0, pattern, 0, NULL, 0);
         return m >= 0;
     } else if (Text$ends_with(text, Text("{end}"), NULL)) {
@@ -783,12 +785,14 @@ PUREFUNC static bool Pattern$has(Text_t text, Text_t pattern) {
 }
 
 static bool Pattern$matches(Text_t text, Text_t pattern) {
+    if (pattern.length == 0) return true;
     capture_t captures[MAX_BACKREFS] = {};
     int64_t match_len = match(text, 0, pattern, 0, NULL, 0);
     return (match_len == text.length);
 }
 
 static bool Pattern$match_at(Text_t text, Text_t pattern, Int_t pos, PatternMatch *dest) {
+    if (pattern.length == 0) return true;
     int64_t start = Int64$from_int(pos, false) - 1;
     capture_t captures[MAX_BACKREFS] = {};
     int64_t match_len = match(text, start, pattern, 0, captures, 0);
@@ -806,6 +810,7 @@ static bool Pattern$match_at(Text_t text, Text_t pattern, Int_t pos, PatternMatc
 }
 
 static OptionalList_t Pattern$captures(Text_t text, Text_t pattern) {
+    if (pattern.length == 0) return EMPTY_LIST;
     capture_t captures[MAX_BACKREFS] = {};
     int64_t match_len = match(text, 0, pattern, 0, captures, 0);
     if (match_len != text.length) return NONE_LIST;
@@ -819,8 +824,8 @@ static OptionalList_t Pattern$captures(Text_t text, Text_t pattern) {
 }
 
 static List_t Pattern$find_all(Text_t text, Text_t pattern) {
-    if (pattern.length == 0) // special case
-        return (List_t){.length = 0};
+    if (text.length == 0 || pattern.length == 0) // special case
+        return EMPTY_LIST;
 
     List_t matches = {};
     for (int64_t i = 1;;) {
@@ -932,6 +937,7 @@ static Text_t apply_backrefs(Text_t text, List_t recursive_replacements, Text_t 
 }
 
 static Text_t Pattern$replace(Text_t text, Text_t pattern, Text_t replacement, Text_t backref_marker, bool recursive) {
+    if (text.length == 0 || pattern.length == 0) return text;
     Text_t ret = EMPTY_TEXT;
 
     int32_t first_grapheme = Text$get_grapheme(pattern, 0);
@@ -986,6 +992,7 @@ static Text_t Pattern$replace(Text_t text, Text_t pattern, Text_t replacement, T
 }
 
 static Text_t Pattern$trim(Text_t text, Text_t pattern, bool trim_left, bool trim_right) {
+    if (text.length == 0 || pattern.length == 0) return text;
     int64_t first = 0, last = text.length - 1;
     if (trim_left) {
         int64_t match_len = match(text, 0, pattern, 0, NULL, 0);
@@ -1002,6 +1009,7 @@ static Text_t Pattern$trim(Text_t text, Text_t pattern, bool trim_left, bool tri
 }
 
 static Text_t Pattern$map(Text_t text, Text_t pattern, Closure_t fn, bool recursive) {
+    if (text.length == 0 || pattern.length == 0) return text;
     Text_t ret = EMPTY_TEXT;
 
     int32_t first_grapheme = Text$get_grapheme(pattern, 0);
@@ -1052,6 +1060,7 @@ static Text_t Pattern$map(Text_t text, Text_t pattern, Closure_t fn, bool recurs
 }
 
 static void Pattern$each(Text_t text, Text_t pattern, Closure_t fn, bool recursive) {
+    if (text.length == 0 || pattern.length == 0) return;
     int32_t first_grapheme = Text$get_grapheme(pattern, 0);
     bool find_first = (first_grapheme != '{' && !uc_is_property((ucs4_t)first_grapheme, UC_PROPERTY_QUOTATION_MARK)
                        && !uc_is_property((ucs4_t)first_grapheme, UC_PROPERTY_PAIRED_PUNCTUATION));
@@ -1086,7 +1095,7 @@ static void Pattern$each(Text_t text, Text_t pattern, Closure_t fn, bool recursi
 }
 
 Text_t replace_list(Text_t text, List_t replacements, Text_t backref_marker, bool recursive) {
-    if (replacements.length == 0) return text;
+    if (text.length == 0 || replacements.length == 0) return text;
 
     Text_t ret = EMPTY_TEXT;
 
@@ -1136,7 +1145,7 @@ static Text_t Pattern$replace_all(Text_t text, Table_t replacements, Text_t back
 
 static List_t Pattern$split(Text_t text, Text_t pattern) {
     if (text.length == 0) // special case
-        return (List_t){.length = 0};
+        return EMPTY_LIST;
 
     if (pattern.length == 0) // special case
         return Text$clusters(text);

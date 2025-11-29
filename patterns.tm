@@ -56,8 +56,12 @@ lang Pat
         return C_code:Text`Pattern$trim(@text, @pattern, @left, @right)`
 
 
-func main()
-    pass
+func main(text:Text, pattern:Pat, replacement:Text?=none)
+    if r := replacement
+        say(pattern.replace(text, r))
+    else
+        say("Matches: $(pattern.find_in(text))")
+
     # >> "Hello world".match($Pat'{id}')
     # >> "...Hello world".match($Pat'{id}')
 # func main(pattern:Pat, input=(/dev/stdin))

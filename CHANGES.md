@@ -1,5 +1,9 @@
 # Version History
 
+## v2025-11-29
+
+- Fixed bugs where empty text could cause infinite loops.
+
 ## v2.0
 - Update to new Tomo syntax and overhaul
 
