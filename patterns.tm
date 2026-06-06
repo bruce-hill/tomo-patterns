@@ -1,4 +1,5 @@
 use ./patterns.c
+use -lunistring
 
 struct PatternMatch(text:Text, index:Int, captures:[Text])
 
